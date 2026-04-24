@@ -23,20 +23,23 @@ app.use(session({
   cookie: { secure: false }
 }));
 
-// ================= DATABASE (FIXED) =================
+// ================= DATABASE (FIXED + SSL SUPPORT) =================
 const db = mysql.createConnection({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: 3306
+  port: 3306,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-// SAFE CONNECT (NO CRASH)
+// SAFE CONNECTION (NO CRASH)
 db.connect((err) => {
   if (err) {
     console.error("❌ DB connection failed:", err.message);
-    console.log("⚠️ Server will still run without DB. Fix env vars on Render.");
+    console.log("⚠️ Server running without DB. Fix Render env variables.");
     return;
   }
   console.log("✅ Connected to MySQL database");
@@ -45,30 +48,30 @@ db.connect((err) => {
 
 // ================= TABLES =================
 function createTables() {
-  db.query(`CREATE TABLE IF NOT EXISTS users (
-    userid INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(50) UNIQUE,
-    password VARCHAR(255),
-    email VARCHAR(100),
-    fullname VARCHAR(100),
-    phone VARCHAR(20),
-    role VARCHAR(50) DEFAULT 'staff',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  )`);
+  db.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      userid INT AUTO_INCREMENT PRIMARY KEY,
+      username VARCHAR(50) UNIQUE,
+      password VARCHAR(255),
+      email VARCHAR(100),
+      fullname VARCHAR(100),
+      phone VARCHAR(20),
+      role VARCHAR(50) DEFAULT 'staff',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 }
 
-// ================= ROUTES =================
-
-// Health check
+// ================= HEALTH CHECK =================
 app.get("/api/health", (req, res) => {
   res.json({
     status: "OK",
-    db: db.state,
-    time: new Date()
+    time: new Date(),
+    dbState: db.state
   });
 });
 
-// REGISTER
+// ================= REGISTER =================
 app.post("/api/register", async (req, res) => {
   const { username, password, email } = req.body;
 
@@ -88,7 +91,7 @@ app.post("/api/register", async (req, res) => {
   );
 });
 
-// LOGIN
+// ================= LOGIN =================
 app.post("/api/login", (req, res) => {
   const { username, password } = req.body;
 
@@ -104,17 +107,42 @@ app.post("/api/login", (req, res) => {
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return res.status(401).json({ error: "Wrong password" });
 
-      req.session.user = user;
+      req.session.user = {
+        id: user.userid,
+        username: user.username,
+        email: user.email
+      };
 
       res.json({
         success: true,
-        user: {
-          id: user.userid,
-          username: user.username
-        }
+        user: req.session.user
       });
     }
   );
+});
+
+// ================= LOGOUT =================
+app.post("/api/logout", (req, res) => {
+  req.session.destroy();
+  res.json({ success: true });
+});
+
+// ================= DASHBOARD STATS =================
+app.get("/api/dashboard/stats", (req, res) => {
+  const data = {
+    totalSlots: 20,
+    availableSlots: 12,
+    occupiedSlots: 8,
+    todayRevenue: 50000
+  };
+
+  res.json(data);
+});
+
+// ================= ERROR HANDLER =================
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: "Server error" });
 });
 
 // ================= START SERVER =================
